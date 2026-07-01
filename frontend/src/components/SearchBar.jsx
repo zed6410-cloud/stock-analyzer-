@@ -7,6 +7,7 @@ export default function SearchBar({ onSelect }) {
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const timerRef = useRef(null);
   const wrapRef = useRef(null);
 
@@ -21,6 +22,7 @@ export default function SearchBar({ onSelect }) {
   const handleChange = (e) => {
     const val = e.target.value;
     setQuery(val);
+    setNotFound(false);
     clearTimeout(timerRef.current);
     if (!val.trim()) { setResults([]); setOpen(false); return; }
     timerRef.current = setTimeout(async () => {
@@ -37,12 +39,28 @@ export default function SearchBar({ onSelect }) {
   const handleSelect = (symbol) => {
     setQuery(symbol);
     setOpen(false);
+    setNotFound(false);
     onSelect(symbol);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (query.trim()) { setOpen(false); onSelect(query.trim().toUpperCase()); }
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setOpen(false);
+
+    // 검색 결과가 이미 떠 있으면(한글 검색 등) 첫 번째 결과의 실제 티커를 사용
+    if (results.length > 0) {
+      setNotFound(false);
+      onSelect(results[0].symbol);
+      return;
+    }
+
+    // 결과가 없고 한글이 섞여있으면 티커가 아닐 가능성이 높으므로 그대로 보내지 않음
+    if (/[가-힣]/.test(trimmed)) { setNotFound(true); return; }
+
+    setNotFound(false);
+    onSelect(trimmed.toUpperCase());
   };
 
   return (
@@ -69,6 +87,9 @@ export default function SearchBar({ onSelect }) {
             </li>
           ))}
         </ul>
+      )}
+      {notFound && (
+        <div className="search-not-found">일치하는 종목을 찾지 못했습니다. 검색 결과 목록에서 선택해주세요.</div>
       )}
     </div>
   );
