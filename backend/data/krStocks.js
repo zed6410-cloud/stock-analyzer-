@@ -69,14 +69,13 @@ export const KR_STOCKS = [
   { name: '크래프톤', symbol: '259960.KS' },
   { name: '펄어비스', symbol: '263750.KQ' },
   { name: '위메이드', symbol: '112040.KQ' },
-  { name: '셀트리온헬스케어', symbol: '091990.KQ' },
   { name: '에코프로', symbol: '086520.KQ' },
   { name: '에코프로비엠', symbol: '247540.KQ' },
   { name: '알테오젠', symbol: '196170.KQ' },
   { name: 'HLB', symbol: '028300.KQ' },
   { name: '리노공업', symbol: '058470.KQ' },
   { name: '레인보우로보틱스', symbol: '277810.KQ' },
-  { name: '엘앤에프', symbol: '066970.KQ' },
+  { name: '엘앤에프', symbol: '066970.KS' },
   { name: 'JYP엔터테인먼트', symbol: '035900.KQ' },
   { name: 'JYP엔터', symbol: '035900.KQ' },
   { name: '에스엠', symbol: '041510.KQ' },
@@ -84,7 +83,6 @@ export const KR_STOCKS = [
   { name: '하이브', symbol: '352820.KS' },
   { name: '와이지엔터테인먼트', symbol: '122870.KQ' },
   { name: 'YG엔터테인먼트', symbol: '122870.KQ' },
-  { name: '오스템임플란트', symbol: '048260.KQ' },
   { name: '씨젠', symbol: '096530.KQ' },
   { name: '동화기업', symbol: '025900.KQ' },
   { name: '천보', symbol: '278280.KQ' },
@@ -106,7 +104,6 @@ export const KR_STOCKS = [
   { name: 'NH투자증권', symbol: '005940.KS' },
   { name: '삼성증권', symbol: '016360.KS' },
   { name: '한국투자증권', symbol: '071050.KS' },
-  { name: '메리츠증권', symbol: '008560.KS' },
 ];
 
 export function searchKrStocks(query) {

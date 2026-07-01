@@ -135,6 +135,9 @@ router.get('/quote/:symbol', async (req, res) => {
       epsTrailingTwelveMonths: extra.epsTrailingTwelveMonths,
     });
   } catch (err) {
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: '존재하지 않거나 상장폐지된 종목입니다' });
+    }
     console.error('quote error:', err.message);
     res.status(500).json({ error: err.message });
   }
@@ -163,6 +166,9 @@ router.get('/chart/:symbol', async (req, res) => {
     })).filter(c => c.close != null);
     res.json(candles);
   } catch (err) {
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: '존재하지 않거나 상장폐지된 종목입니다' });
+    }
     console.error('chart error:', err.message);
     res.status(500).json({ error: err.message });
   }
