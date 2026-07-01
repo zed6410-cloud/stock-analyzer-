@@ -11,6 +11,35 @@ function hasKorean(text) {
 
 const YF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// 간단한 인메모리 캐시: Yahoo 요청 횟수를 줄여 429(Too Many Requests) 차단을 방지
+const _cache = new Map();
+function cacheGet(key) {
+  const hit = _cache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() > hit.expires) { _cache.delete(key); return undefined; }
+  return hit.value;
+}
+function cacheSet(key, value, ttlMs) {
+  _cache.set(key, { value, expires: Date.now() + ttlMs });
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// 429(요청 과다) 응답 시 짧게 대기 후 1회 재시도
+async function withRetry429(fn, retries = 2, delayMs = 800) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e.response?.status === 429 && i < retries) {
+        await sleep(delayMs * (i + 1));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 let _crumb = null;
 let _cookies = null;
 let _crumbTime = 0;
@@ -49,21 +78,32 @@ async function ensureCrumb() {
 }
 
 async function yfAuthed(url, params = {}) {
-  const { crumb, cookies } = await ensureCrumb();
-  const res = await axios.get(url, {
-    params: { ...params, crumb },
-    headers: { 'User-Agent': YF_UA, Cookie: cookies },
+  return withRetry429(async () => {
+    const { crumb, cookies } = await ensureCrumb();
+    const res = await axios.get(url, {
+      params: { ...params, crumb },
+      headers: { 'User-Agent': YF_UA, Cookie: cookies },
+    });
+    return res.data;
   });
-  return res.data;
 }
 
-// Yahoo Finance v8 차트 (인증 불필요)
+// Yahoo Finance v8 차트 (인증 불필요) - 짧은 캐시로 중복 요청 방지
 async function getChart(symbol, range = '1y', interval = '1d') {
-  const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
-    headers: { 'User-Agent': YF_UA },
-    params: { interval, range, includePrePost: false },
+  const cacheKey = `chart:${symbol}:${range}:${interval}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const result = await withRetry429(async () => {
+    const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
+      headers: { 'User-Agent': YF_UA },
+      params: { interval, range, includePrePost: false },
+    });
+    return res.data.chart?.result?.[0];
   });
-  return res.data.chart?.result?.[0];
+
+  cacheSet(cacheKey, result, 60 * 1000);
+  return result;
 }
 
 // 종목 검색 (나스닥/코스닥/코스피 등 전세계 상장 종목 대상)
@@ -109,7 +149,12 @@ router.get('/quote/:symbol', async (req, res) => {
 
     let extra = {};
     try {
-      const data = await yfAuthed('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
+      const cacheKey = `v7quote:${symbol}`;
+      let data = cacheGet(cacheKey);
+      if (data === undefined) {
+        data = await yfAuthed('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
+        cacheSet(cacheKey, data, 30 * 1000);
+      }
       const q = data.quoteResponse?.result?.[0] || {};
       extra = {
         marketCap: q.marketCap,
@@ -245,6 +290,11 @@ router.get('/financials/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
     const debug = req.query.debug === '1';
+
+    const cacheKey = `financials:${symbol}`;
+    const cached = cacheGet(cacheKey);
+    if (cached !== undefined && !debug) return res.json(cached);
+
     let income = [], balance = [], cashflow = [], keyMetrics = {}, analystTarget = {};
     const errors = {};
 
@@ -294,7 +344,12 @@ router.get('/financials/:symbol', async (req, res) => {
       errors.quoteSummary = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
-    res.json({ income, balance, cashflow, keyMetrics, analystTarget, ...(debug ? { errors } : {}) });
+    const payload = { income, balance, cashflow, keyMetrics, analystTarget };
+    // 데이터가 하나라도 있으면 캐시(1시간) - 전부 비어있으면(429 등) 캐시하지 않고 다음 요청에서 재시도되게 함
+    if (income.length || balance.length || cashflow.length || Object.keys(keyMetrics).length) {
+      cacheSet(cacheKey, payload, 60 * 60 * 1000);
+    }
+    res.json({ ...payload, ...(debug ? { errors } : {}) });
   } catch (err) {
     console.error('financials error:', err.message);
     res.status(500).json({ error: err.message });
