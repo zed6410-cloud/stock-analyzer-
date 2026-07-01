@@ -1,5 +1,7 @@
 .app {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: #0f1117;
 }
 
@@ -48,8 +50,31 @@
 
 .app-main {
   max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
   padding: 24px;
+  flex: 1;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 20px;
+  border-top: 1px solid #2d3354;
+}
+
+.footer-link {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.footer-link:hover { color: #93c5fd; }
+
+.footer-sep {
+  color: #2d3354;
+  margin: 0 10px;
 }
 
 /* Landing */

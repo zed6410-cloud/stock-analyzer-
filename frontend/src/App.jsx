@@ -8,9 +8,12 @@ import AIAnalysis from './components/AIAnalysis';
 import MarketNews from './components/MarketNews';
 import StockNews from './components/StockNews';
 import Watchlist from './components/Watchlist';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import Terms from './components/Terms';
 import './App.css';
 
 export default function App() {
+  const [page, setPage] = useState('home'); // 'home' | 'privacy' | 'terms'
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [quote, setQuote] = useState(null);
   const [financials, setFinancials] = useState(null);
@@ -71,6 +74,7 @@ export default function App() {
   }, [selectedSymbol]);
 
   const handleGoHome = () => {
+    setPage('home');
     setSelectedSymbol(null);
     setQuote(null);
     setFinancials(null);
@@ -106,7 +110,10 @@ export default function App() {
       </header>
 
       <main className="app-main">
-        {!selectedSymbol && (
+        {page === 'privacy' && <PrivacyPolicy onBack={handleGoHome} />}
+        {page === 'terms' && <Terms onBack={handleGoHome} />}
+
+        {page === 'home' && !selectedSymbol && (
           <div className="landing">
             <h1>AI 기반 주식 분석 플랫폼</h1>
             <p>주식 이름 또는 티커를 검색하여 재무제표, 차트, AI 분석을 확인하세요</p>
@@ -119,21 +126,21 @@ export default function App() {
           </div>
         )}
 
-        {!selectedSymbol && <Watchlist onSelect={handleSelectStock} />}
-        {!selectedSymbol && <MarketNews />}
+        {page === 'home' && !selectedSymbol && <Watchlist onSelect={handleSelectStock} />}
+        {page === 'home' && !selectedSymbol && <MarketNews />}
 
-        {loading && (
+        {page === 'home' && loading && (
           <div className="loading-screen">
             <div className="spinner" />
             <p>데이터 불러오는 중...</p>
           </div>
         )}
 
-        {error && (
+        {page === 'home' && error && (
           <div className="error-banner">{error}</div>
         )}
 
-        {!loading && quote && (
+        {page === 'home' && !loading && quote && (
           <div className="stock-content">
             <StockOverview quote={quote} />
             <StockChart data={chartData} symbol={quote.symbol} onPeriodChange={handleChartPeriodChange} />
@@ -149,6 +156,12 @@ export default function App() {
           </div>
         )}
       </main>
+
+      <footer className="app-footer">
+        <button className="footer-link" onClick={() => setPage('privacy')}>개인정보 처리방침</button>
+        <span className="footer-sep">·</span>
+        <button className="footer-link" onClick={() => setPage('terms')}>이용약관</button>
+      </footer>
     </div>
   );
 }
