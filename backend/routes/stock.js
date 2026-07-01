@@ -1,7 +1,12 @@
 import express from 'express';
 import axios from 'axios';
+import { searchKrStocks } from '../data/krStocks.js';
 
 const router = express.Router();
+
+function hasKorean(text) {
+  return /[가-힣]/.test(text);
+}
 
 const YF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -53,6 +58,12 @@ router.get('/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: '검색어를 입력하세요' });
 
+    // 한글 검색어는 Yahoo가 거부하므로 로컬 매핑 테이블에서 먼저 찾음
+    if (hasKorean(q)) {
+      const local = searchKrStocks(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: s.symbol.endsWith('.KQ') ? 'KOE' : 'KSC' }));
+      return res.json(local);
+    }
+
     const data = await yfAuthed('https://query2.finance.yahoo.com/v1/finance/search', {
       q, quotesCount: 15, newsCount: 0,
     });
@@ -62,7 +73,6 @@ router.get('/search', async (req, res) => {
       .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname, exchange: x.exchange }));
     res.json(quotes);
   } catch (err) {
-    // Yahoo는 비영문(한글 등) 검색어를 거부함 - 빈 목록으로 우아하게 처리
     if (err.response?.status === 400) return res.json([]);
     console.error('search error:', err.message);
     res.status(500).json({ error: err.message });
