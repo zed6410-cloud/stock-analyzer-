@@ -216,7 +216,7 @@ router.get('/quote/:symbol', async (req, res) => {
         data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
           modules: 'summaryDetail,defaultKeyStatistics,price',
         });
-        cacheSet(cacheKey, data, 5 * 60 * 1000);
+        cacheSet(cacheKey, data, 4 * 60 * 60 * 1000);
       }
       extra = extractExtra(data.quoteSummary?.result?.[0] || {});
     } catch (e) {
