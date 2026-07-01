@@ -50,11 +50,15 @@ function cacheGet(key) {
 function cacheSet(key, value, ttlMs) {
   _cache.set(key, { value, expires: Date.now() + ttlMs });
 }
+// 만료 여부와 상관없이 마지막으로 성공한 값을 반환 (429 등으로 새로 못 받아올 때 대체용)
+function cacheGetStale(key) {
+  return _cache.get(key)?.value;
+}
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // 429(요청 과다) 응답 시 짧게 대기 후 1회 재시도
-async function withRetry429(fn, retries = 2, delayMs = 800) {
+async function withRetry429(fn, retries = 3, delayMs = 1000) {
   for (let i = 0; i <= retries; i++) {
     try {
       return await fn();
@@ -189,12 +193,12 @@ router.get('/quote/:symbol', async (req, res) => {
 
     let extra = {};
     let extraError = null;
+    const cacheKey = `v7quote:${symbol}`;
     try {
-      const cacheKey = `v7quote:${symbol}`;
       let data = cacheGet(cacheKey);
       if (data === undefined) {
         data = await yfAuthed('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
-        cacheSet(cacheKey, data, 30 * 1000);
+        cacheSet(cacheKey, data, 5 * 60 * 1000);
       }
       const q = data.quoteResponse?.result?.[0] || {};
       extra = {
@@ -207,8 +211,22 @@ router.get('/quote/:symbol', async (req, res) => {
         regularMarketOpen: q.regularMarketOpen,
       };
     } catch (e) {
-      console.log('v7 quote 실패:', e.message);
+      console.log('v7 quote 실패, 캐시된 값으로 대체 시도:', e.message);
       extraError = { message: e.message, status: e.response?.status, data: e.response?.data };
+      // 새로 못 받아오면 만료됐더라도 마지막 성공값을 그대로 사용 (완전 공백보다 나음)
+      const stale = cacheGetStale(cacheKey);
+      const q = stale?.quoteResponse?.result?.[0];
+      if (q) {
+        extra = {
+          marketCap: q.marketCap,
+          trailingPE: q.trailingPE,
+          forwardPE: q.forwardPE,
+          dividendYield: q.dividendYield ? q.dividendYield / 100 : undefined,
+          beta: q.beta,
+          epsTrailingTwelveMonths: q.epsTrailingTwelveMonths,
+          regularMarketOpen: q.regularMarketOpen,
+        };
+      }
     }
 
     const ohlcv = result.indicators?.quote?.[0] || {};
