@@ -165,6 +165,19 @@ async function getChart(symbol, range = '1y', interval = '1d') {
   return result;
 }
 
+// 환율 (원화 환산가 표시용, 인증 불필요)
+router.get('/exchange-rate/:pair', async (req, res) => {
+  try {
+    const { pair } = req.params; // 예: USDKRW
+    const result = await getChart(`${pair}=X`, '5d', '1d');
+    if (!result) return res.status(404).json({ error: '환율 정보를 찾을 수 없습니다' });
+    res.json({ rate: result.meta.regularMarketPrice });
+  } catch (err) {
+    console.error('exchange-rate error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 종목 검색 (나스닥/코스닥/코스피 등 전세계 상장 종목 대상)
 router.get('/search', async (req, res) => {
   try {

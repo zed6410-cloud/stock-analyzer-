@@ -7,6 +7,7 @@ import FinancialStatements from './components/FinancialStatements';
 import AIAnalysis from './components/AIAnalysis';
 import MarketNews from './components/MarketNews';
 import StockNews from './components/StockNews';
+import Watchlist from './components/Watchlist';
 import './App.css';
 
 export default function App() {
@@ -109,6 +110,7 @@ export default function App() {
           </div>
         )}
 
+        {!selectedSymbol && <Watchlist onSelect={handleSelectStock} />}
         {!selectedSymbol && <MarketNews />}
 
         {loading && (

@@ -11,12 +11,32 @@
   gap: 16px;
 }
 
+.stock-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .stock-name {
   font-size: 24px;
   font-weight: 700;
   color: #f1f5f9;
   margin-bottom: 6px;
 }
+
+.star-btn {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: #475569;
+  padding: 0;
+  margin-bottom: 6px;
+  transition: color 0.15s, transform 0.15s;
+}
+.star-btn:hover { transform: scale(1.15); }
+.star-btn.active { color: #fbbf24; }
 
 .stock-meta {
   display: flex;
@@ -61,6 +81,12 @@
   border-radius: 50%;
   background: #34d399;
   animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.krw-price {
+  font-size: 14px;
+  color: #93c5fd;
+  margin-bottom: 6px;
 }
 
 @keyframes live-pulse {

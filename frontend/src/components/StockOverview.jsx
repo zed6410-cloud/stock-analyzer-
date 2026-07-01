@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from '../api';
+import { isWatched, toggleWatch } from '../watchlist';
 import './StockOverview.css';
 
 function fmt(n, currency) {
@@ -23,11 +25,37 @@ export default function StockOverview({ quote }) {
   const changeColor = isUp ? '#34d399' : '#f87171';
   const changeSign = isUp ? '+' : '';
 
+  const [watched, setWatched] = useState(() => isWatched(quote.symbol));
+  const [krwRate, setKrwRate] = useState(null);
+
+  useEffect(() => {
+    setWatched(isWatched(quote.symbol));
+  }, [quote.symbol]);
+
+  useEffect(() => {
+    if (quote.currency === 'KRW' || !quote.currency) { setKrwRate(null); return; }
+    let cancelled = false;
+    axios.get(`/api/stock/exchange-rate/${quote.currency}KRW`)
+      .then(res => { if (!cancelled) setKrwRate(res.data.rate); })
+      .catch(() => { if (!cancelled) setKrwRate(null); });
+    return () => { cancelled = true; };
+  }, [quote.currency]);
+
+  const handleToggleWatch = () => {
+    toggleWatch(quote.symbol, quote.name);
+    setWatched(isWatched(quote.symbol));
+  };
+
   return (
     <div className="overview-card card">
       <div className="overview-top">
         <div className="overview-name">
-          <h1 className="stock-name">{quote.name}</h1>
+          <div className="stock-name-row">
+            <button className={`star-btn${watched ? ' active' : ''}`} onClick={handleToggleWatch} title="관심종목">
+              {watched ? '★' : '☆'}
+            </button>
+            <h1 className="stock-name">{quote.name}</h1>
+          </div>
           <div className="stock-meta">
             <span className="stock-symbol">{quote.symbol}</span>
             <span className="stock-exchange">{quote.exchange}</span>
@@ -38,6 +66,11 @@ export default function StockOverview({ quote }) {
           <div className="current-price">
             {quote.regularMarketPrice?.toLocaleString()} <span className="currency">{quote.currency}</span>
           </div>
+          {krwRate && (
+            <div className="krw-price">
+              ≈ {Math.round(quote.regularMarketPrice * krwRate).toLocaleString()} 원
+            </div>
+          )}
           <div className="price-change" style={{ color: changeColor }}>
             {changeSign}{quote.regularMarketChange?.toFixed(2)} ({changeSign}{quote.regularMarketChangePercent?.toFixed(2)}%)
           </div>
