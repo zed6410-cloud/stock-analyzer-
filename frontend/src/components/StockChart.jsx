@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import {
-  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
+  ComposedChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
 } from 'recharts';
 import './StockChart.css';
 
 const PERIODS = ['1d', '1m', '3m', '6m', '1y', '3y', '5y'];
 
-const CustomTooltip = ({ active, payload, label, isIntraday }) => {
+const CustomTooltip = ({ active, payload, isIntraday }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d) return null;
@@ -26,6 +26,33 @@ const CustomTooltip = ({ active, payload, label, isIntraday }) => {
   );
 };
 
+// 캔들스틱(막대) 렌더러: 고가-저가 심지 + 시가-종가 몸통
+const Candle = (props) => {
+  const { x, y, width, height, payload } = props;
+  const { open, close, high, low } = payload;
+  if (open == null || close == null || high == null || low == null || high === low) return null;
+
+  const isUp = close >= open;
+  const color = isUp ? '#34d399' : '#f87171';
+  const range = high - low;
+  const valueToY = (v) => y + height * (high - v) / range;
+
+  const openY = valueToY(open);
+  const closeY = valueToY(close);
+  const bodyTop = Math.min(openY, closeY);
+  const bodyHeight = Math.max(Math.abs(closeY - openY), 1);
+  const wickX = x + width / 2;
+  const bodyWidth = Math.max(width * 0.6, 1);
+  const bodyX = x + (width - bodyWidth) / 2;
+
+  return (
+    <g>
+      <line x1={wickX} x2={wickX} y1={y} y2={y + height} stroke={color} strokeWidth={1} />
+      <rect x={bodyX} y={bodyTop} width={bodyWidth} height={bodyHeight} fill={color} />
+    </g>
+  );
+};
+
 export default function StockChart({ data, symbol, onPeriodChange }) {
   const [period, setPeriod] = useState('1y');
 
@@ -41,10 +68,6 @@ export default function StockChart({ data, symbol, onPeriodChange }) {
       ? new Date(d.date).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
       : new Date(d.date).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }),
   }));
-
-  const firstClose = formatted[0]?.close || 1;
-  const lastClose = formatted[formatted.length - 1]?.close || 1;
-  const isPositive = lastClose >= firstClose;
 
   return (
     <div className="chart-card card">
@@ -76,6 +99,7 @@ export default function StockChart({ data, symbol, onPeriodChange }) {
             <YAxis
               yAxisId="price"
               orientation="right"
+              domain={['auto', 'auto']}
               tick={{ fill: '#64748b', fontSize: 11 }}
               tickLine={false}
               tickFormatter={v => v.toLocaleString()}
@@ -90,14 +114,12 @@ export default function StockChart({ data, symbol, onPeriodChange }) {
             />
             <Tooltip content={<CustomTooltip isIntraday={isIntraday} />} />
             <Bar yAxisId="volume" dataKey="volume" fill="#2d3a6b" opacity={0.5} name="거래량" />
-            <Line
+            <Bar
               yAxisId="price"
-              type="monotone"
-              dataKey="close"
-              stroke={isPositive ? '#34d399' : '#f87171'}
-              strokeWidth={2}
-              dot={false}
-              name="종가"
+              dataKey={(d) => [d.low, d.high]}
+              shape={Candle}
+              name="가격"
+              isAnimationActive={false}
             />
           </ComposedChart>
         </ResponsiveContainer>
