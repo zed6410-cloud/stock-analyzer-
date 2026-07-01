@@ -188,6 +188,7 @@ router.get('/quote/:symbol', async (req, res) => {
     const change = currentPrice - prevClose;
 
     let extra = {};
+    let extraError = null;
     try {
       const cacheKey = `v7quote:${symbol}`;
       let data = cacheGet(cacheKey);
@@ -207,6 +208,7 @@ router.get('/quote/:symbol', async (req, res) => {
       };
     } catch (e) {
       console.log('v7 quote 실패:', e.message);
+      extraError = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
     const ohlcv = result.indicators?.quote?.[0] || {};
@@ -233,6 +235,7 @@ router.get('/quote/:symbol', async (req, res) => {
       dividendYield: extra.dividendYield,
       beta: extra.beta,
       epsTrailingTwelveMonths: extra.epsTrailingTwelveMonths,
+      ...(req.query.debug === '1' ? { extraError } : {}),
     });
   } catch (err) {
     if (err.response?.status === 404) {
