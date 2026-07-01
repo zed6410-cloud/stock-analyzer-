@@ -70,6 +70,15 @@ export default function App() {
     return () => clearInterval(timer);
   }, [selectedSymbol]);
 
+  const handleGoHome = () => {
+    setSelectedSymbol(null);
+    setQuote(null);
+    setFinancials(null);
+    setChartData([]);
+    setAnalysis(null);
+    setError(null);
+  };
+
   const handleAnalyze = async () => {
     if (!quote) return;
     setAnalysisLoading(true);
@@ -87,11 +96,11 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-content">
-          <div className="logo">
+          <button className="logo" onClick={handleGoHome} title="홈으로">
             <span className="logo-icon">📈</span>
             <span className="logo-text">StockAI</span>
             <span className="logo-sub">주식 분석기</span>
-          </div>
+          </button>
           <SearchBar onSelect={handleSelectStock} />
         </div>
       </header>
