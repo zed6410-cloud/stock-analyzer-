@@ -1,0 +1,113 @@
+.financials-card { }
+
+.fin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.fin-tab {
+  background: #0f1117;
+  border: 1px solid #2d3354;
+  color: #64748b;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.fin-tab:hover { color: #93c5fd; border-color: #3d4766; }
+.fin-tab.active {
+  background: #1e3a8a;
+  border-color: #60a5fa;
+  color: #bfdbfe;
+}
+
+.fin-section { }
+
+.fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 16px;
+}
+.fin-table th, .fin-table td {
+  padding: 10px 16px;
+  text-align: right;
+  border-bottom: 1px solid #2d3354;
+}
+.fin-table th:first-child, .fin-table td:first-child {
+  text-align: left;
+  color: #94a3b8;
+}
+.fin-table th {
+  color: #64748b;
+  font-size: 12px;
+  background: #0f1117;
+}
+.fin-table td {
+  color: #e2e8f0;
+  font-family: monospace;
+}
+.fin-table tr:hover td { background: #1e2340; }
+
+.key-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.key-metric {
+  background: #0f1117;
+  border: 1px solid #2d3354;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.km-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.km-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  font-family: monospace;
+}
+
+.analyst-box {
+  background: #0f1117;
+  border: 1px solid #2d3354;
+  border-radius: 10px;
+  padding: 20px;
+}
+.analyst-box h3 {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 16px;
+}
+.analyst-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.analyst-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.analyst-item span {
+  font-size: 11px;
+  color: #64748b;
+}
+.analyst-item strong {
+  font-size: 18px;
+  color: #e2e8f0;
+  font-family: monospace;
+}

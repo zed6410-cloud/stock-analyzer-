@@ -1,0 +1,96 @@
+.overview-card {
+  background: #1a1d2e;
+}
+
+.overview-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.stock-name {
+  font-size: 24px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 6px;
+}
+
+.stock-meta {
+  display: flex;
+  gap: 8px;
+}
+
+.stock-symbol {
+  font-family: monospace;
+  font-size: 13px;
+  background: #0f1117;
+  color: #60a5fa;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #2d3354;
+}
+
+.stock-exchange {
+  font-size: 13px;
+  color: #64748b;
+  padding: 2px 8px;
+  background: #0f1117;
+  border-radius: 4px;
+  border: 1px solid #2d3354;
+}
+
+.overview-price {
+  text-align: right;
+}
+
+.current-price {
+  font-size: 36px;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.currency {
+  font-size: 18px;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.price-change {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  background: #0f1117;
+  border: 1px solid #2d3354;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.metric-label {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.metric-value {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-family: monospace;
+}
