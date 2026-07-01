@@ -9,6 +9,34 @@ function hasKorean(text) {
   return /[가-힣]/.test(text);
 }
 
+// ETF/ETN 등 파생상품 브랜드명이 섞인 결과 제외 (예: "KODEX 삼성전자단일종목레버리지")
+const FUND_BRAND_RE = /^(KODEX|TIGER|ACE|RISE|KIWOOM|KBSTAR|HANARO|SOL|미래에셋|삼성자산운용|한투|파워)\s/;
+
+// 네이버 증권 자동완성 API로 한글 종목명을 실시간으로 검색 (미국/한국 주식 전체 커버, 별도 유지보수 목록 불필요)
+async function searchNaver(query) {
+  const res = await axios.get('https://ac.stock.naver.com/ac', {
+    params: { q: query, target: 'stock' },
+    headers: { 'User-Agent': YF_UA },
+    timeout: 5000,
+  });
+  const items = res.data?.items || [];
+
+  const EXCHANGE_MAP = {
+    KOSPI: 'KSC', KOSDAQ: 'KOE', KONEX: 'KNX',
+    NASDAQ: 'NMS', NYSE: 'NYQ', AMEX: 'ASE',
+  };
+
+  return items
+    .filter(it => it.category === 'stock' && EXCHANGE_MAP[it.typeCode] && !FUND_BRAND_RE.test(it.name))
+    .map(it => {
+      let symbol = it.code;
+      if (it.nationCode === 'KOR') {
+        symbol = `${it.code}${it.typeCode === 'KOSDAQ' ? '.KQ' : '.KS'}`;
+      }
+      return { symbol, name: it.name, exchange: EXCHANGE_MAP[it.typeCode] };
+    });
+}
+
 const YF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // 간단한 인메모리 캐시: Yahoo 요청 횟수를 줄여 429(Too Many Requests) 차단을 방지
@@ -112,8 +140,20 @@ router.get('/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: '검색어를 입력하세요' });
 
-    // 한글 검색어는 Yahoo가 거부하므로 로컬 매핑 테이블(한국 종목 + 미국 종목 한글명)에서 찾음
+    // 한글 검색어는 Yahoo가 거부하므로: 1) 네이버 증권 실시간 검색(전세계 종목 커버) 2) 실패 시 로컬 목록으로 대체
     if (hasKorean(q)) {
+      try {
+        const cacheKey = `naversearch:${q}`;
+        let naverResults = cacheGet(cacheKey);
+        if (naverResults === undefined) {
+          naverResults = await searchNaver(q);
+          cacheSet(cacheKey, naverResults, 10 * 60 * 1000);
+        }
+        if (naverResults.length > 0) return res.json(naverResults.slice(0, 15));
+      } catch (e) {
+        console.log('네이버 검색 실패, 로컬 목록으로 대체:', e.message);
+      }
+
       const krMatches = searchKrStocks(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: s.symbol.endsWith('.KQ') ? 'KOE' : 'KSC' }));
       const usMatches = searchUsStocksKr(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: 'NMS' }));
       return res.json([...krMatches, ...usMatches]);
