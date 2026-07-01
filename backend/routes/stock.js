@@ -193,40 +193,38 @@ router.get('/quote/:symbol', async (req, res) => {
 
     let extra = {};
     let extraError = null;
-    const cacheKey = `v7quote:${symbol}`;
+    const cacheKey = `quoteSummary:${symbol}`;
+
+    const extractExtra = (r) => {
+      const sd = r.summaryDetail || {};
+      const ks = r.defaultKeyStatistics || {};
+      const price = r.price || {};
+      return {
+        marketCap: price.marketCap?.raw,
+        trailingPE: sd.trailingPE?.raw,
+        forwardPE: sd.forwardPE?.raw,
+        dividendYield: sd.dividendYield?.raw,
+        beta: sd.beta?.raw,
+        epsTrailingTwelveMonths: ks.trailingEps?.raw,
+        regularMarketOpen: price.regularMarketOpen?.raw,
+      };
+    };
+
     try {
       let data = cacheGet(cacheKey);
       if (data === undefined) {
-        data = await yfAuthed('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
+        data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
+          modules: 'summaryDetail,defaultKeyStatistics,price',
+        });
         cacheSet(cacheKey, data, 5 * 60 * 1000);
       }
-      const q = data.quoteResponse?.result?.[0] || {};
-      extra = {
-        marketCap: q.marketCap,
-        trailingPE: q.trailingPE,
-        forwardPE: q.forwardPE,
-        dividendYield: q.dividendYield ? q.dividendYield / 100 : undefined,
-        beta: q.beta,
-        epsTrailingTwelveMonths: q.epsTrailingTwelveMonths,
-        regularMarketOpen: q.regularMarketOpen,
-      };
+      extra = extractExtra(data.quoteSummary?.result?.[0] || {});
     } catch (e) {
-      console.log('v7 quote 실패, 캐시된 값으로 대체 시도:', e.message);
+      console.log('quoteSummary 실패, 캐시된 값으로 대체 시도:', e.message);
       extraError = { message: e.message, status: e.response?.status, data: e.response?.data };
       // 새로 못 받아오면 만료됐더라도 마지막 성공값을 그대로 사용 (완전 공백보다 나음)
       const stale = cacheGetStale(cacheKey);
-      const q = stale?.quoteResponse?.result?.[0];
-      if (q) {
-        extra = {
-          marketCap: q.marketCap,
-          trailingPE: q.trailingPE,
-          forwardPE: q.forwardPE,
-          dividendYield: q.dividendYield ? q.dividendYield / 100 : undefined,
-          beta: q.beta,
-          epsTrailingTwelveMonths: q.epsTrailingTwelveMonths,
-          regularMarketOpen: q.regularMarketOpen,
-        };
-      }
+      if (stale) extra = extractExtra(stale.quoteSummary?.result?.[0] || {});
     }
 
     const ohlcv = result.indicators?.quote?.[0] || {};
