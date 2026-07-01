@@ -120,6 +120,33 @@ async function yfAuthed(url, params = {}) {
   });
 }
 
+// Finnhub 무료 API (미국 주식 PER/베타/시가총액 등 - Yahoo 429 차단 회피용, 카드등록 불필요)
+async function getFinnhubMetrics(symbol) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key) return null;
+  const cacheKey = `finnhub:${symbol}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const res = await axios.get('https://finnhub.io/api/v1/stock/metric', {
+    params: { symbol, metric: 'all', token: key },
+    timeout: 5000,
+  });
+  const m = res.data?.metric || {};
+  if (!m.peTTM && !m.beta) return null;
+
+  const result = {
+    marketCap: m.marketCapitalization ? m.marketCapitalization * 1e6 : undefined,
+    trailingPE: m.peTTM,
+    forwardPE: m.forwardPE,
+    dividendYield: m.dividendYieldIndicatedAnnual ? m.dividendYieldIndicatedAnnual / 100 : undefined,
+    beta: m.beta,
+    epsTrailingTwelveMonths: m.epsTTM,
+  };
+  cacheSet(cacheKey, result, 4 * 60 * 60 * 1000);
+  return result;
+}
+
 // Yahoo Finance v8 차트 (인증 불필요) - 짧은 캐시로 중복 요청 방지
 async function getChart(symbol, range = '1y', interval = '1d') {
   const cacheKey = `chart:${symbol}:${range}:${interval}`;
@@ -210,21 +237,32 @@ router.get('/quote/:symbol', async (req, res) => {
       };
     };
 
+    // 1순위: Finnhub 무료 API (미국 주식) - Yahoo 429 차단과 무관하게 안정적으로 동작
     try {
-      let data = cacheGet(cacheKey);
-      if (data === undefined) {
-        data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
-          modules: 'summaryDetail,defaultKeyStatistics,price',
-        });
-        cacheSet(cacheKey, data, 4 * 60 * 60 * 1000);
-      }
-      extra = extractExtra(data.quoteSummary?.result?.[0] || {});
+      const fh = await getFinnhubMetrics(symbol);
+      if (fh) extra = fh;
     } catch (e) {
-      console.log('quoteSummary 실패, 캐시된 값으로 대체 시도:', e.message);
-      extraError = { message: e.message, status: e.response?.status, data: e.response?.data };
-      // 새로 못 받아오면 만료됐더라도 마지막 성공값을 그대로 사용 (완전 공백보다 나음)
-      const stale = cacheGetStale(cacheKey);
-      if (stale) extra = extractExtra(stale.quoteSummary?.result?.[0] || {});
+      console.log('Finnhub 실패:', e.message);
+    }
+
+    // 2순위: Yahoo quoteSummary (Finnhub 미지원 종목, 예: 한국 주식)
+    if (!extra.beta && !extra.trailingPE) {
+      try {
+        let data = cacheGet(cacheKey);
+        if (data === undefined) {
+          data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
+            modules: 'summaryDetail,defaultKeyStatistics,price',
+          });
+          cacheSet(cacheKey, data, 4 * 60 * 60 * 1000);
+        }
+        extra = { ...extractExtra(data.quoteSummary?.result?.[0] || {}), ...extra };
+      } catch (e) {
+        console.log('quoteSummary 실패, 캐시된 값으로 대체 시도:', e.message);
+        extraError = { message: e.message, status: e.response?.status, data: e.response?.data };
+        // 새로 못 받아오면 만료됐더라도 마지막 성공값을 그대로 사용 (완전 공백보다 나음)
+        const stale = cacheGetStale(cacheKey);
+        if (stale) extra = { ...extractExtra(stale.quoteSummary?.result?.[0] || {}), ...extra };
+      }
     }
 
     const ohlcv = result.indicators?.quote?.[0] || {};
