@@ -1,58 +1,41 @@
 import express from 'express';
 import axios from 'axios';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import os from 'os';
-import path from 'path';
 
 const router = express.Router();
-const execFileAsync = promisify(execFile);
-const CURL = 'C:\\Windows\\System32\\curl.exe';
-const COOKIE_FILE = path.join(os.tmpdir(), 'yf_cookies.txt');
 
 const YF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 let _crumb = null;
+let _cookies = null;
 let _crumbTime = 0;
 
+// 순수 Node/axios 기반 인증 (curl 불필요, 모든 OS에서 동작)
 async function ensureCrumb() {
-  if (_crumb && Date.now() - _crumbTime < 25 * 60 * 1000) return _crumb;
+  if (_crumb && Date.now() - _crumbTime < 25 * 60 * 1000) return { crumb: _crumb, cookies: _cookies };
 
-  // 쿠키 수집
-  await execFileAsync(CURL, [
-    '-s', '-L',
-    '-c', COOKIE_FILE, '-b', COOKIE_FILE,
-    '-A', YF_UA,
-    '-H', 'Accept: text/html',
-    'https://finance.yahoo.com',
-    '-o', process.platform === 'win32' ? 'NUL' : '/dev/null',
-  ]).catch(() => {});
+  const r1 = await axios.get('https://fc.yahoo.com', {
+    headers: { 'User-Agent': YF_UA },
+    maxRedirects: 0,
+    validateStatus: () => true,
+  });
+  _cookies = (r1.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
 
-  // 크럼 요청
-  const { stdout: crumb } = await execFileAsync(CURL, [
-    '-s',
-    '-b', COOKIE_FILE, '-c', COOKIE_FILE,
-    '-A', YF_UA,
-    'https://query2.finance.yahoo.com/v1/test/getcrumb',
-  ]);
-
-  _crumb = crumb.trim();
+  const r2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': YF_UA, Cookie: _cookies },
+  });
+  _crumb = r2.data;
   _crumbTime = Date.now();
-  console.log('YF crumb 획득:', _crumb.slice(0, 6) + '...');
-  return _crumb;
+  console.log('YF crumb 획득:', String(_crumb).slice(0, 6) + '...');
+  return { crumb: _crumb, cookies: _cookies };
 }
 
-async function yfCurl(url, params = {}) {
-  const crumb = await ensureCrumb();
-  const qs = new URLSearchParams({ ...params, crumb }).toString();
-  const { stdout } = await execFileAsync(CURL, [
-    '-s',
-    '-b', COOKIE_FILE,
-    '-A', YF_UA,
-    '-H', 'Accept: application/json',
-    `${url}?${qs}`,
-  ]);
-  return JSON.parse(stdout);
+async function yfAuthed(url, params = {}) {
+  const { crumb, cookies } = await ensureCrumb();
+  const res = await axios.get(url, {
+    params: { ...params, crumb },
+    headers: { 'User-Agent': YF_UA, Cookie: cookies },
+  });
+  return res.data;
 }
 
 // Yahoo Finance v8 차트 (인증 불필요)
@@ -64,21 +47,23 @@ async function getChart(symbol, range = '1y', interval = '1d') {
   return res.data.chart?.result?.[0];
 }
 
-// 종목 검색
+// 종목 검색 (나스닥/코스닥/코스피 등 전세계 상장 종목 대상)
 router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: '검색어를 입력하세요' });
 
-    const data = await yfCurl('https://query2.finance.yahoo.com/v1/finance/search', {
-      q, quotesCount: 10, newsCount: 0,
+    const data = await yfAuthed('https://query2.finance.yahoo.com/v1/finance/search', {
+      q, quotesCount: 15, newsCount: 0,
     });
 
     const quotes = (data.quotes || [])
-      .filter(x => x.quoteType === 'EQUITY')
+      .filter(x => x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
       .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname, exchange: x.exchange }));
     res.json(quotes);
   } catch (err) {
+    // Yahoo는 비영문(한글 등) 검색어를 거부함 - 빈 목록으로 우아하게 처리
+    if (err.response?.status === 400) return res.json([]);
     console.error('search error:', err.message);
     res.status(500).json({ error: err.message });
   }
@@ -89,7 +74,6 @@ router.get('/quote/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
 
-    // v8 차트에서 기본 데이터
     const result = await getChart(symbol, '5d', '1d');
     if (!result) return res.status(404).json({ error: '종목을 찾을 수 없습니다' });
     const meta = result.meta;
@@ -98,16 +82,15 @@ router.get('/quote/:symbol', async (req, res) => {
     const prevClose = meta.chartPreviousClose;
     const change = currentPrice - prevClose;
 
-    // v7 quote에서 추가 데이터
     let extra = {};
     try {
-      const data = await yfCurl('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
+      const data = await yfAuthed('https://query2.finance.yahoo.com/v7/finance/quote', { symbols: symbol });
       const q = data.quoteResponse?.result?.[0] || {};
       extra = {
         marketCap: q.marketCap,
         trailingPE: q.trailingPE,
         forwardPE: q.forwardPE,
-        dividendYield: q.dividendYield,
+        dividendYield: q.dividendYield ? q.dividendYield / 100 : undefined,
         beta: q.beta,
         epsTrailingTwelveMonths: q.epsTrailingTwelveMonths,
         regularMarketOpen: q.regularMarketOpen,
@@ -182,7 +165,7 @@ router.get('/financials/:symbol', async (req, res) => {
     let income = [], balance = [], cashflow = [], keyMetrics = {}, analystTarget = {};
 
     try {
-      const data = await yfCurl(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
+      const data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
         modules: 'incomeStatementHistory,balanceSheetHistory,cashflowStatementHistory,financialData,defaultKeyStatistics',
       });
       const r = data.quoteSummary?.result?.[0] || {};

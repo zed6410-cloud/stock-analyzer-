@@ -52,7 +52,7 @@ export default function SearchBar({ onSelect }) {
         <input
           className="searchbar-input"
           type="text"
-          placeholder="주식 이름 또는 티커 검색 (예: Apple, AAPL, 삼성, 005930.KS)"
+          placeholder="영문 이름 또는 티커로 검색 (예: Apple, AAPL, Samsung, 005930.KS)"
           value={query}
           onChange={handleChange}
           onFocus={() => results.length > 0 && setOpen(true)}
