@@ -244,7 +244,9 @@ async function getTimeseriesFinancials(symbol) {
 router.get('/financials/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
+    const debug = req.query.debug === '1';
     let income = [], balance = [], cashflow = [], keyMetrics = {}, analystTarget = {};
+    const errors = {};
 
     try {
       const ts = await getTimeseriesFinancials(symbol);
@@ -253,6 +255,7 @@ router.get('/financials/:symbol', async (req, res) => {
       cashflow = ts.cashflow;
     } catch (e) {
       console.log('timeseries 재무제표 오류:', e.message);
+      errors.timeseries = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
     try {
@@ -288,9 +291,10 @@ router.get('/financials/:symbol', async (req, res) => {
       };
     } catch (e) {
       console.log('재무제표 오류:', e.message);
+      errors.quoteSummary = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
-    res.json({ income, balance, cashflow, keyMetrics, analystTarget });
+    res.json({ income, balance, cashflow, keyMetrics, analystTarget, ...(debug ? { errors } : {}) });
   } catch (err) {
     console.error('financials error:', err.message);
     res.status(500).json({ error: err.message });
