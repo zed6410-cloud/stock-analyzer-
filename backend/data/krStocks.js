@@ -195,16 +195,22 @@ export const KR_STOCKS = [
   { name: '덕산네오룩스', symbol: '213420.KQ' },
 ];
 
+import { KR_FULL_LIST } from './krFullList.js';
+
+// 수기로 등록한 영문/약칭 별칭(KR_STOCKS)과 KRX 공식 전체 목록(KR_FULL_LIST, 코스피+코스닥 약 1,800개)을 합쳐서 검색
+const COMBINED = [...KR_STOCKS, ...KR_FULL_LIST];
+
 export function searchKrStocks(query) {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const seen = new Set();
-  const results = [];
-  for (const s of KR_STOCKS) {
-    if (s.name.toLowerCase().includes(q) && !seen.has(s.symbol)) {
-      seen.add(s.symbol);
-      results.push(s);
-    }
+  const startsWith = [];
+  const includes = [];
+  for (const s of COMBINED) {
+    const name = s.name.toLowerCase();
+    if (!name.includes(q) || seen.has(s.symbol)) continue;
+    seen.add(s.symbol);
+    (name.startsWith(q) ? startsWith : includes).push(s);
   }
-  return results.slice(0, 15);
+  return [...startsWith, ...includes].slice(0, 15);
 }
