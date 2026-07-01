@@ -5,6 +5,8 @@ import StockOverview from './components/StockOverview';
 import StockChart from './components/StockChart';
 import FinancialStatements from './components/FinancialStatements';
 import AIAnalysis from './components/AIAnalysis';
+import MarketNews from './components/MarketNews';
+import StockNews from './components/StockNews';
 import './App.css';
 
 export default function App() {
@@ -107,6 +109,8 @@ export default function App() {
           </div>
         )}
 
+        {!selectedSymbol && <MarketNews />}
+
         {loading && (
           <div className="loading-screen">
             <div className="spinner" />
@@ -122,6 +126,7 @@ export default function App() {
           <div className="stock-content">
             <StockOverview quote={quote} />
             <StockChart data={chartData} symbol={quote.symbol} onPeriodChange={handleChartPeriodChange} />
+            <StockNews symbol={quote.symbol} />
             <FinancialStatements financials={financials} currency={quote.currency} />
             <AIAnalysis
               analysis={analysis}
