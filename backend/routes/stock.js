@@ -1,6 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import { searchKrStocks } from '../data/krStocks.js';
+import { searchUsStocksKr } from '../data/usStocksKr.js';
 
 const router = express.Router();
 
@@ -13,25 +14,38 @@ const YF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHT
 let _crumb = null;
 let _cookies = null;
 let _crumbTime = 0;
+let _crumbPromise = null;
 
 // 순수 Node/axios 기반 인증 (curl 불필요, 모든 OS에서 동작)
+// 동시 요청 시 쿠키/크럼이 꼬이지 않도록 진행 중인 fetch를 공유(in-flight promise 캐싱)
 async function ensureCrumb() {
   if (_crumb && Date.now() - _crumbTime < 25 * 60 * 1000) return { crumb: _crumb, cookies: _cookies };
+  if (_crumbPromise) return _crumbPromise;
 
-  const r1 = await axios.get('https://fc.yahoo.com', {
-    headers: { 'User-Agent': YF_UA },
-    maxRedirects: 0,
-    validateStatus: () => true,
-  });
-  _cookies = (r1.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+  _crumbPromise = (async () => {
+    const r1 = await axios.get('https://fc.yahoo.com', {
+      headers: { 'User-Agent': YF_UA },
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+    const cookies = (r1.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
 
-  const r2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-    headers: { 'User-Agent': YF_UA, Cookie: _cookies },
-  });
-  _crumb = r2.data;
-  _crumbTime = Date.now();
-  console.log('YF crumb 획득:', String(_crumb).slice(0, 6) + '...');
-  return { crumb: _crumb, cookies: _cookies };
+    const r2 = await axios.get('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { 'User-Agent': YF_UA, Cookie: cookies },
+    });
+
+    _cookies = cookies;
+    _crumb = r2.data;
+    _crumbTime = Date.now();
+    console.log('YF crumb 획득:', String(_crumb).slice(0, 6) + '...');
+    return { crumb: _crumb, cookies: _cookies };
+  })();
+
+  try {
+    return await _crumbPromise;
+  } finally {
+    _crumbPromise = null;
+  }
 }
 
 async function yfAuthed(url, params = {}) {
@@ -58,10 +72,11 @@ router.get('/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: '검색어를 입력하세요' });
 
-    // 한글 검색어는 Yahoo가 거부하므로 로컬 매핑 테이블에서 먼저 찾음
+    // 한글 검색어는 Yahoo가 거부하므로 로컬 매핑 테이블(한국 종목 + 미국 종목 한글명)에서 찾음
     if (hasKorean(q)) {
-      const local = searchKrStocks(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: s.symbol.endsWith('.KQ') ? 'KOE' : 'KSC' }));
-      return res.json(local);
+      const krMatches = searchKrStocks(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: s.symbol.endsWith('.KQ') ? 'KOE' : 'KSC' }));
+      const usMatches = searchUsStocksKr(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: 'NMS' }));
+      return res.json([...krMatches, ...usMatches]);
     }
 
     const data = await yfAuthed('https://query2.finance.yahoo.com/v1/finance/search', {
@@ -174,6 +189,57 @@ router.get('/chart/:symbol', async (req, res) => {
   }
 });
 
+// Yahoo의 신형 fundamentals-timeseries API로 연간 재무제표 항목을 가져옴
+// (구형 quoteSummary의 balanceSheetHistory/cashflowStatementHistory는 Yahoo가 값을 비워버림)
+const TIMESERIES_TYPES = [
+  'annualTotalRevenue', 'annualGrossProfit', 'annualOperatingIncome', 'annualNetIncome', 'annualEBITDA',
+  'annualOperatingCashFlow', 'annualCapitalExpenditure', 'annualFreeCashFlow',
+  'annualTotalAssets', 'annualTotalLiabilitiesNetMinorityInterest', 'annualStockholdersEquity', 'annualCashAndCashEquivalents',
+];
+
+async function getTimeseriesFinancials(symbol) {
+  const data = await yfAuthed(`https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${symbol}`, {
+    type: TIMESERIES_TYPES.join(','),
+    period1: 0,
+    period2: Math.floor(Date.now() / 1000),
+  });
+
+  const series = {};
+  for (const r of data.timeseries?.result || []) {
+    const type = r.meta?.type?.[0];
+    if (!type || !r[type]) continue;
+    series[type] = r[type].map(v => ({ date: v?.asOfDate, value: v?.reportedValue?.raw }));
+  }
+
+  const byDate = (type) => Object.fromEntries((series[type] || []).filter(v => v.date).map(v => [v.date, v.value]));
+  const dates = [...new Set(Object.values(series).flat().map(v => v.date).filter(Boolean))].sort().reverse().slice(0, 4);
+
+  const revenue = byDate('annualTotalRevenue');
+  const gross = byDate('annualGrossProfit');
+  const opInc = byDate('annualOperatingIncome');
+  const net = byDate('annualNetIncome');
+  const ebitda = byDate('annualEBITDA');
+  const opCash = byDate('annualOperatingCashFlow');
+  const capex = byDate('annualCapitalExpenditure');
+  const fcf = byDate('annualFreeCashFlow');
+  const assets = byDate('annualTotalAssets');
+  const liab = byDate('annualTotalLiabilitiesNetMinorityInterest');
+  const equity = byDate('annualStockholdersEquity');
+  const cash = byDate('annualCashAndCashEquivalents');
+
+  const income = dates.map(date => ({
+    date, totalRevenue: revenue[date], grossProfit: gross[date], operatingIncome: opInc[date], netIncome: net[date], ebitda: ebitda[date],
+  }));
+  const balance = dates.map(date => ({
+    date, totalAssets: assets[date], totalLiab: liab[date], totalStockholderEquity: equity[date], cash: cash[date],
+  }));
+  const cashflow = dates.map(date => ({
+    date, operatingCashflow: opCash[date], capitalExpenditures: capex[date], freeCashflow: fcf[date],
+  }));
+
+  return { income, balance, cashflow };
+}
+
 // 재무제표
 router.get('/financials/:symbol', async (req, res) => {
   try {
@@ -181,34 +247,22 @@ router.get('/financials/:symbol', async (req, res) => {
     let income = [], balance = [], cashflow = [], keyMetrics = {}, analystTarget = {};
 
     try {
+      const ts = await getTimeseriesFinancials(symbol);
+      income = ts.income;
+      balance = ts.balance;
+      cashflow = ts.cashflow;
+    } catch (e) {
+      console.log('timeseries 재무제표 오류:', e.message);
+    }
+
+    try {
       const data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
-        modules: 'incomeStatementHistory,balanceSheetHistory,cashflowStatementHistory,financialData,defaultKeyStatistics',
+        modules: 'financialData,defaultKeyStatistics',
       });
       const r = data.quoteSummary?.result?.[0] || {};
       const fd = r.financialData || {};
       const ks = r.defaultKeyStatistics || {};
 
-      income = (r.incomeStatementHistory?.incomeStatementHistory || []).map(s => ({
-        date: s.endDate?.fmt,
-        totalRevenue: s.totalRevenue?.raw,
-        grossProfit: s.grossProfit?.raw,
-        operatingIncome: s.operatingIncome?.raw,
-        netIncome: s.netIncome?.raw,
-        ebitda: s.ebitda?.raw,
-      }));
-      balance = (r.balanceSheetHistory?.balanceSheetStatements || []).map(s => ({
-        date: s.endDate?.fmt,
-        totalAssets: s.totalAssets?.raw,
-        totalLiab: s.totalLiab?.raw,
-        totalStockholderEquity: s.totalStockholderEquity?.raw,
-        cash: s.cash?.raw,
-      }));
-      cashflow = (r.cashflowStatementHistory?.cashflowStatements || []).map(s => ({
-        date: s.endDate?.fmt,
-        operatingCashflow: s.totalCashFromOperatingActivities?.raw,
-        capitalExpenditures: s.capitalExpenditures?.raw,
-        freeCashflow: s.freeCashFlow?.raw,
-      }));
       keyMetrics = {
         priceToBook: ks.priceToBook?.raw,
         pegRatio: ks.pegRatio?.raw,
