@@ -43,24 +43,38 @@ export default function SearchBar({ onSelect }) {
     onSelect(symbol);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
     setOpen(false);
+    clearTimeout(timerRef.current);
 
-    // 검색 결과가 이미 떠 있으면(한글 검색 등) 첫 번째 결과의 실제 티커를 사용
-    if (results.length > 0) {
+    const isKorean = /[가-힣]/.test(trimmed);
+
+    // 한글이 아니면 그대로 티커로 시도 (AAPL, 005930.KS 등 즉시 입력 지원)
+    if (!isKorean) {
       setNotFound(false);
-      onSelect(results[0].symbol);
+      onSelect(trimmed.toUpperCase());
       return;
     }
 
-    // 결과가 없고 한글이 섞여있으면 티커가 아닐 가능성이 높으므로 그대로 보내지 않음
-    if (/[가-힣]/.test(trimmed)) { setNotFound(true); return; }
-
-    setNotFound(false);
-    onSelect(trimmed.toUpperCase());
+    // 한글 검색어는 디바운스된 상태에 의존하지 않고 즉시 실시간 검색
+    setLoading(true);
+    try {
+      const res = await axios.get(`/api/stock/search?q=${encodeURIComponent(trimmed)}`);
+      const found = res.data;
+      if (found.length > 0) {
+        setNotFound(false);
+        onSelect(found[0].symbol);
+      } else {
+        setNotFound(true);
+      }
+    } catch {
+      setNotFound(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
