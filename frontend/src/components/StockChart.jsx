@@ -5,15 +5,18 @@ import {
 } from 'recharts';
 import './StockChart.css';
 
-const PERIODS = ['1m', '3m', '6m', '1y', '3y', '5y'];
+const PERIODS = ['1d', '1m', '3m', '6m', '1y', '3y', '5y'];
 
-const CustomTooltip = ({ active, payload, label }) => {
+const CustomTooltip = ({ active, payload, label, isIntraday }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload;
   if (!d) return null;
+  const dateLabel = isIntraday
+    ? new Date(d.date).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    : new Date(d.date).toLocaleDateString('ko-KR');
   return (
     <div className="chart-tooltip">
-      <div className="tt-date">{new Date(d.date).toLocaleDateString('ko-KR')}</div>
+      <div className="tt-date">{dateLabel}</div>
       <div className="tt-row"><span>종가</span><span>{d.close?.toLocaleString()}</span></div>
       <div className="tt-row"><span>시가</span><span>{d.open?.toLocaleString()}</span></div>
       <div className="tt-row"><span>고가</span><span style={{color:'#34d399'}}>{d.high?.toLocaleString()}</span></div>
@@ -31,9 +34,12 @@ export default function StockChart({ data, symbol, onPeriodChange }) {
     onPeriodChange(p);
   };
 
+  const isIntraday = period === '1d';
   const formatted = data.map(d => ({
     ...d,
-    dateStr: new Date(d.date).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }),
+    dateStr: isIntraday
+      ? new Date(d.date).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      : new Date(d.date).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }),
   }));
 
   const firstClose = formatted[0]?.close || 1;
@@ -82,7 +88,7 @@ export default function StockChart({ data, symbol, onPeriodChange }) {
               tickFormatter={v => (v / 1e6).toFixed(0) + 'M'}
               width={50}
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip isIntraday={isIntraday} />} />
             <Bar yAxisId="volume" dataKey="volume" fill="#2d3a6b" opacity={0.5} name="거래량" />
             <Line
               yAxisId="price"

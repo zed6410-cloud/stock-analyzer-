@@ -34,6 +34,7 @@ export default function StockOverview({ quote }) {
           </div>
         </div>
         <div className="overview-price">
+          <div className="live-badge"><span className="live-dot" />실시간</div>
           <div className="current-price">
             {quote.regularMarketPrice?.toLocaleString()} <span className="currency">{quote.currency}</span>
           </div>

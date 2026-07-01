@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from './api';
 import SearchBar from './components/SearchBar';
 import StockOverview from './components/StockOverview';
@@ -42,12 +42,30 @@ export default function App() {
   const handleChartPeriodChange = async (period) => {
     if (!selectedSymbol) return;
     try {
-      const res = await axios.get(`/api/stock/chart/${selectedSymbol}?period=${period}&interval=${period === '1m' ? '1d' : period === '3m' ? '1d' : '1wk'}`);
+      const interval = period === '1d' ? '2m' : (period === '1m' || period === '3m') ? '1d' : '1wk';
+      const res = await axios.get(`/api/stock/chart/${selectedSymbol}?period=${period}&interval=${interval}`);
       setChartData(res.data);
     } catch (err) {
       console.error(err);
     }
   };
+
+  // 30초마다 현재가를 자동 갱신 (실시간에 가까운 시세 업데이트)
+  const selectedSymbolRef = useRef(selectedSymbol);
+  selectedSymbolRef.current = selectedSymbol;
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await axios.get(`/api/stock/quote/${selectedSymbolRef.current}`);
+        setQuote(res.data);
+      } catch {
+        // 자동 갱신 실패는 조용히 무시 (기존 값 유지)
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [selectedSymbol]);
 
   const handleAnalyze = async () => {
     if (!quote) return;

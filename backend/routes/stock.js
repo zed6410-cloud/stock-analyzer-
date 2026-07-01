@@ -207,11 +207,12 @@ router.get('/quote/:symbol', async (req, res) => {
 router.get('/chart/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-    const { period = '1y', interval = '1d' } = req.query;
+    const { period = '1y' } = req.query;
     const rangeMap = {
-      '1m': '1mo', '3m': '3mo', '6m': '6mo', '1y': '1y', '3y': '3y', '5y': '5y',
+      '1d': '1d', '1m': '1mo', '3m': '3mo', '6m': '6mo', '1y': '1y', '3y': '3y', '5y': '5y',
     };
-    const result = await getChart(symbol, rangeMap[period] || '1y', interval);
+    const defaultInterval = period === '1d' ? '2m' : '1d';
+    const result = await getChart(symbol, rangeMap[period] || '1y', req.query.interval || defaultInterval);
     if (!result) return res.status(404).json({ error: '차트 데이터 없음' });
 
     const timestamps = result.timestamp || [];
