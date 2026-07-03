@@ -10,6 +10,7 @@ import StockNews from './components/StockNews';
 import Watchlist from './components/Watchlist';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import Terms from './components/Terms';
+import TaxCalculator from './components/TaxCalculator';
 import './App.css';
 
 export default function App() {
@@ -112,6 +113,7 @@ export default function App() {
       <main className="app-main">
         {page === 'privacy' && <PrivacyPolicy onBack={handleGoHome} />}
         {page === 'terms' && <Terms onBack={handleGoHome} />}
+        {page === 'taxcalc' && <TaxCalculator onBack={handleGoHome} />}
 
         {page === 'home' && !selectedSymbol && (
           <div className="landing">
@@ -123,6 +125,9 @@ export default function App() {
                 <button key={s} className="example-btn" onClick={() => handleSelectStock(s)}>{s}</button>
               ))}
             </div>
+            <button className="taxcalc-teaser" onClick={() => setPage('taxcalc')}>
+              🧾 해외주식 양도소득세 계산기 바로가기
+            </button>
           </div>
         )}
 
@@ -161,6 +166,8 @@ export default function App() {
         <button className="footer-link" onClick={() => setPage('privacy')}>개인정보 처리방침</button>
         <span className="footer-sep">·</span>
         <button className="footer-link" onClick={() => setPage('terms')}>이용약관</button>
+        <span className="footer-sep">·</span>
+        <button className="footer-link" onClick={() => setPage('taxcalc')}>양도소득세 계산기</button>
       </footer>
     </div>
   );
