@@ -451,6 +451,78 @@ async function getNaverKrFinancials(symbol) {
   return { income: income.reverse(), keyMetrics };
 }
 
+// WiseReport(FnGuide, 네이버 증권이 재무제표 탭에 쓰는 실제 소스)에서 재무상태표/현금흐름표를 가져옴
+// (네이버 증권 자체 API는 간이 요약만 제공하고 자산/부채/현금 절대값이 없어 별도 소스 필요)
+const NAVER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function getWiseReportStatement(code, rpt) {
+  const pageUrl = `https://navercomp.wisereport.co.kr/v2/company/c1030001.aspx?cmp_cd=${code}`;
+  const pageRes = await axios.get(pageUrl, { headers: { 'User-Agent': NAVER_UA }, timeout: 5000 });
+  const m = /encparam:\s*'([^']*)'/.exec(pageRes.data);
+  if (!m) return null;
+  const encparam = m[1];
+
+  const dataRes = await axios.get('https://navercomp.wisereport.co.kr/v2/company/cF3002.aspx', {
+    params: { cmp_cd: code, frq: 0, rpt, finGubun: 'MAIN', frqTyp: 0, cn: '', encparam },
+    headers: { 'User-Agent': NAVER_UA, Referer: pageUrl },
+    timeout: 5000,
+  });
+  return dataRes.data;
+}
+
+function wiseReportRow(data, name) {
+  const row = (data?.DATA || []).find(r => r.ACC_NM?.replace(/^\.+/, '') === name);
+  if (!row) return {};
+  // YYMM은 연도 6개(마지막은 추정치) + YoY 2개 컬럼 -> DATA1..DATA5가 최근 5개 확정 연도
+  const years = (data.YYMM || []).slice(0, 5).map(y => y.slice(0, 4));
+  const result = {};
+  years.forEach((year, i) => { result[year] = row[`DATA${i + 1}`]; });
+  return result;
+}
+
+async function getKrBalanceCashflow(symbol) {
+  const code = symbol.replace(/\.(KS|KQ)$/i, '');
+  const UNIT = 1e8;
+  const [balRes, cfRes] = await Promise.allSettled([
+    getWiseReportStatement(code, 1),
+    getWiseReportStatement(code, 2),
+  ]);
+
+  let balance = [], cashflow = [];
+  if (balRes.status === 'fulfilled' && balRes.value) {
+    const d = balRes.value;
+    const assets = wiseReportRow(d, '자산총계');
+    const liab = wiseReportRow(d, '부채총계');
+    const equity = wiseReportRow(d, '자본총계');
+    const cash = wiseReportRow(d, '현금및현금성자산');
+    const years = Object.keys(assets).sort().reverse();
+    balance = years.filter(y => assets[y] != null).map(year => ({
+      date: `${year}-12-31`,
+      totalAssets: assets[year] * UNIT,
+      totalLiab: liab[year] * UNIT,
+      totalStockholderEquity: equity[year] * UNIT,
+      cash: cash[year] != null ? cash[year] * UNIT : undefined,
+    }));
+  }
+  if (cfRes.status === 'fulfilled' && cfRes.value) {
+    const d = cfRes.value;
+    const opCash = wiseReportRow(d, '영업활동으로인한현금흐름');
+    const capex = wiseReportRow(d, '유형자산의증가');
+    const years = Object.keys(opCash).sort().reverse();
+    cashflow = years.filter(y => opCash[y] != null).map(year => {
+      const op = opCash[year] * UNIT;
+      const capexVal = capex[year] != null ? -capex[year] * UNIT : undefined;
+      return {
+        date: `${year}-12-31`,
+        operatingCashflow: op,
+        capitalExpenditures: capexVal,
+        freeCashflow: capexVal != null ? op + capexVal : undefined,
+      };
+    });
+  }
+  return { balance, cashflow };
+}
+
 // 재무제표
 router.get('/financials/:symbol', async (req, res) => {
   try {
@@ -516,17 +588,29 @@ router.get('/financials/:symbol', async (req, res) => {
       errors.quoteSummary = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
-    // 한국 주식은 Yahoo가 비어있으면 네이버 증권 데이터로 대체 (Yahoo 429 차단과 무관하게 동작)
-    if (/\.(KS|KQ)$/i.test(symbol) && income.length === 0 && Object.keys(keyMetrics).length === 0) {
-      try {
-        const naver = await getNaverKrFinancials(symbol);
-        if (naver) {
-          if (naver.income.length) income = naver.income;
-          if (Object.keys(naver.keyMetrics).length) keyMetrics = naver.keyMetrics;
+    // 한국 주식은 Yahoo가 비어있으면 네이버 증권/WiseReport 데이터로 대체 (Yahoo 429 차단과 무관하게 동작)
+    if (/\.(KS|KQ)$/i.test(symbol)) {
+      if (income.length === 0 && Object.keys(keyMetrics).length === 0) {
+        try {
+          const naver = await getNaverKrFinancials(symbol);
+          if (naver) {
+            if (naver.income.length) income = naver.income;
+            if (Object.keys(naver.keyMetrics).length) keyMetrics = naver.keyMetrics;
+          }
+        } catch (e) {
+          console.log('네이버 재무제표 실패:', e.message);
+          errors.naver = { message: e.message };
         }
-      } catch (e) {
-        console.log('네이버 재무제표 실패:', e.message);
-        errors.naver = { message: e.message };
+      }
+      if (balance.length === 0 && cashflow.length === 0) {
+        try {
+          const wise = await getKrBalanceCashflow(symbol);
+          if (wise.balance.length) balance = wise.balance;
+          if (wise.cashflow.length) cashflow = wise.cashflow;
+        } catch (e) {
+          console.log('WiseReport 재무상태표/현금흐름표 실패:', e.message);
+          errors.wisereport = { message: e.message };
+        }
       }
     }
 
