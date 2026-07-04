@@ -44,6 +44,20 @@ async function callOpenRouter(prompt) {
   return text;
 }
 
+// NVIDIA NIM 무료 API 호출 (OpenAI 호환) - Groq/OpenRouter 모두 실패 시 최종 대체용
+async function callNvidia(prompt) {
+  const key = process.env.NVIDIA_API_KEY;
+  const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-8b-instruct';
+  const res = await axios.post('https://integrate.api.nvidia.com/v1/chat/completions', {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 1500,
+  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } });
+  const text = res.data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('NVIDIA NIM 응답이 비어있습니다');
+  return text;
+}
+
 function calcRuleBasedTargets(quote, financials) {
   const price = quote.regularMarketPrice;
   const eps = quote.epsTrailingTwelveMonths;
@@ -117,10 +131,11 @@ router.post('/ai', async (req, res) => {
 
     const hasGroq = process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key_here';
     const hasOpenRouter = process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY !== 'your_openrouter_api_key_here';
+    const hasNvidia = process.env.NVIDIA_API_KEY && process.env.NVIDIA_API_KEY !== 'your_nvidia_api_key_here';
     const hasGemini = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here';
     const hasClaude = process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_claude_api_key_here';
 
-    if (!hasGroq && !hasOpenRouter && !hasGemini && !hasClaude) {
+    if (!hasGroq && !hasOpenRouter && !hasNvidia && !hasGemini && !hasClaude) {
       return res.json({
         ruleBasedAnalysis: ruleBasedResult,
         aiAnalysis: null,
@@ -163,27 +178,28 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
 
 **💡 투자 전략**:`;
 
+    // 순서대로 시도: Groq -> OpenRouter -> NVIDIA NIM -> Gemini -> Claude (앞이 실패하면 다음으로 자동 전환)
+    const providerChain = [
+      hasGroq && { name: 'Groq (Llama 3.3)', call: callGroq },
+      hasOpenRouter && { name: 'OpenRouter (GPT-OSS)', call: callOpenRouter },
+      hasNvidia && { name: 'NVIDIA NIM (Llama)', call: callNvidia },
+      hasGemini && { name: 'Google Gemini', call: callGemini },
+    ].filter(Boolean);
+
     let aiAnalysis, provider;
-    if (hasGroq) {
+    let lastError;
+    for (const p of providerChain) {
       try {
-        aiAnalysis = await callGroq(prompt);
-        provider = 'Groq (Llama 3.3)';
+        aiAnalysis = await p.call(prompt);
+        provider = p.name;
+        break;
       } catch (e) {
-        console.log('Groq 실패, 대체 provider 시도:', e.message);
-        if (hasOpenRouter) {
-          aiAnalysis = await callOpenRouter(prompt);
-          provider = 'OpenRouter (GPT-OSS)';
-        } else {
-          throw e;
-        }
+        console.log(`${p.name} 실패, 다음 provider 시도:`, e.message);
+        lastError = e;
       }
-    } else if (hasOpenRouter) {
-      aiAnalysis = await callOpenRouter(prompt);
-      provider = 'OpenRouter (GPT-OSS)';
-    } else if (hasGemini) {
-      aiAnalysis = await callGemini(prompt);
-      provider = 'Google Gemini';
-    } else {
+    }
+
+    if (!aiAnalysis && hasClaude) {
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const message = await client.messages.create({
@@ -193,6 +209,10 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
       });
       aiAnalysis = message.content[0].text;
       provider = 'Claude';
+    }
+
+    if (!aiAnalysis) {
+      throw lastError || new Error('사용 가능한 AI provider가 없습니다');
     }
 
     res.json({
