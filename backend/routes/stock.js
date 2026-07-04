@@ -58,7 +58,9 @@ function cacheGetStale(key) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // 429(요청 과다) 응답 시 짧게 대기 후 1회 재시도
-async function withRetry429(fn, retries = 3, delayMs = 1000) {
+// Render 공용 IP가 Yahoo에 지속적으로 차단되는 경우가 많아, 재시도 횟수를 줄여
+// 실패를 빠르게 확정하고 캐시/대체 소스로 넘어가도록 함 (긴 재시도는 느린 로딩만 유발)
+async function withRetry429(fn, retries = 1, delayMs = 500) {
   for (let i = 0; i <= retries; i++) {
     try {
       return await fn();
@@ -184,33 +186,37 @@ router.get('/search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: '검색어를 입력하세요' });
 
-    // 한글 검색어는 Yahoo가 거부하므로: 1) 네이버 증권 실시간 검색(전세계 종목 커버) 2) 실패 시 로컬 목록으로 대체
-    if (hasKorean(q)) {
-      try {
-        const cacheKey = `naversearch:${q}`;
-        let naverResults = cacheGet(cacheKey);
-        if (naverResults === undefined) {
-          naverResults = await searchNaver(q);
-          cacheSet(cacheKey, naverResults, 10 * 60 * 1000);
-        }
-        if (naverResults.length > 0) return res.json(naverResults.slice(0, 15));
-      } catch (e) {
-        console.log('네이버 검색 실패, 로컬 목록으로 대체:', e.message);
+    // 네이버 증권 실시간 검색을 1순위로 사용 (한글/영문 모두 지원, 전세계 종목 커버, Yahoo 429/크럼 지연 회피)
+    try {
+      const cacheKey = `naversearch:${q}`;
+      let naverResults = cacheGet(cacheKey);
+      if (naverResults === undefined) {
+        naverResults = await searchNaver(q);
+        cacheSet(cacheKey, naverResults, 10 * 60 * 1000);
       }
+      if (naverResults.length > 0) return res.json(naverResults.slice(0, 15));
+    } catch (e) {
+      console.log('네이버 검색 실패, 대체 소스로 전환:', e.message);
+    }
 
+    if (hasKorean(q)) {
       const krMatches = searchKrStocks(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: s.symbol.endsWith('.KQ') ? 'KOE' : 'KSC' }));
       const usMatches = searchUsStocksKr(q).map(s => ({ symbol: s.symbol, name: s.name, exchange: 'NMS' }));
       return res.json([...krMatches, ...usMatches]);
     }
 
-    const data = await yfAuthed('https://query2.finance.yahoo.com/v1/finance/search', {
-      q, quotesCount: 15, newsCount: 0,
-    });
-
-    const quotes = (data.quotes || [])
-      .filter(x => x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
-      .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname, exchange: x.exchange }));
-    res.json(quotes);
+    try {
+      const data = await yfAuthed('https://query2.finance.yahoo.com/v1/finance/search', {
+        q, quotesCount: 15, newsCount: 0,
+      });
+      const quotes = (data.quotes || [])
+        .filter(x => x.quoteType === 'EQUITY' || x.quoteType === 'ETF')
+        .map(x => ({ symbol: x.symbol, name: x.longname || x.shortname, exchange: x.exchange }));
+      res.json(quotes);
+    } catch (e) {
+      if (e.response?.status === 400) return res.json([]);
+      throw e;
+    }
   } catch (err) {
     if (err.response?.status === 400) return res.json([]);
     console.error('search error:', err.message);
@@ -409,21 +415,26 @@ router.get('/financials/:symbol', async (req, res) => {
     let income = [], balance = [], cashflow = [], keyMetrics = {}, analystTarget = {};
     const errors = {};
 
-    try {
-      const ts = await getTimeseriesFinancials(symbol);
-      income = ts.income;
-      balance = ts.balance;
-      cashflow = ts.cashflow;
-    } catch (e) {
+    // 두 Yahoo 호출을 병렬로 실행해 왕복 시간을 절반으로 줄임
+    const [tsResult, qsResult] = await Promise.allSettled([
+      getTimeseriesFinancials(symbol),
+      yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
+        modules: 'financialData,defaultKeyStatistics',
+      }),
+    ]);
+
+    if (tsResult.status === 'fulfilled') {
+      income = tsResult.value.income;
+      balance = tsResult.value.balance;
+      cashflow = tsResult.value.cashflow;
+    } else {
+      const e = tsResult.reason;
       console.log('timeseries 재무제표 오류:', e.message);
       errors.timeseries = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
-    try {
-      const data = await yfAuthed(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}`, {
-        modules: 'financialData,defaultKeyStatistics',
-      });
-      const r = data.quoteSummary?.result?.[0] || {};
+    if (qsResult.status === 'fulfilled') {
+      const r = qsResult.value.quoteSummary?.result?.[0] || {};
       const fd = r.financialData || {};
       const ks = r.defaultKeyStatistics || {};
 
@@ -450,15 +461,22 @@ router.get('/financials/:symbol', async (req, res) => {
         recommendationKey: fd.recommendationKey,
         numberOfAnalystOpinions: fd.numberOfAnalystOpinions?.raw,
       };
-    } catch (e) {
+    } else {
+      const e = qsResult.reason;
       console.log('재무제표 오류:', e.message);
       errors.quoteSummary = { message: e.message, status: e.response?.status, data: e.response?.data };
     }
 
-    const payload = { income, balance, cashflow, keyMetrics, analystTarget };
-    // 데이터가 하나라도 있으면 캐시(1시간) - 전부 비어있으면(429 등) 캐시하지 않고 다음 요청에서 재시도되게 함
-    if (income.length || balance.length || cashflow.length || Object.keys(keyMetrics).length) {
+    let payload = { income, balance, cashflow, keyMetrics, analystTarget };
+    const hasData = income.length || balance.length || cashflow.length || Object.keys(keyMetrics).length;
+
+    if (hasData) {
+      // 데이터가 하나라도 있으면 캐시(1시간)
       cacheSet(cacheKey, payload, 60 * 60 * 1000);
+    } else {
+      // 전부 비어있으면(429 등) 만료됐더라도 마지막 성공값을 대신 사용 (완전 공백보다 나음)
+      const stale = cacheGetStale(cacheKey);
+      if (stale) payload = stale;
     }
     res.json({ ...payload, ...(debug ? { errors } : {}) });
   } catch (err) {
