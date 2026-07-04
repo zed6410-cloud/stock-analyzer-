@@ -30,6 +30,20 @@ async function callGroq(prompt) {
   return text;
 }
 
+// OpenRouter 무료 모델 호출 (OpenAI 호환) - Groq 실패 시 대체용
+async function callOpenRouter(prompt) {
+  const key = process.env.OPENROUTER_API_KEY;
+  const model = process.env.OPENROUTER_MODEL || 'openai/gpt-oss-20b:free';
+  const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 1500,
+  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } });
+  const text = res.data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('OpenRouter 응답이 비어있습니다');
+  return text;
+}
+
 function calcRuleBasedTargets(quote, financials) {
   const price = quote.regularMarketPrice;
   const eps = quote.epsTrailingTwelveMonths;
@@ -102,10 +116,11 @@ router.post('/ai', async (req, res) => {
     const ruleBasedResult = calcRuleBasedTargets(quote, financials);
 
     const hasGroq = process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key_here';
+    const hasOpenRouter = process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY !== 'your_openrouter_api_key_here';
     const hasGemini = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here';
     const hasClaude = process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_claude_api_key_here';
 
-    if (!hasGroq && !hasGemini && !hasClaude) {
+    if (!hasGroq && !hasOpenRouter && !hasGemini && !hasClaude) {
       return res.json({
         ruleBasedAnalysis: ruleBasedResult,
         aiAnalysis: null,
@@ -150,8 +165,21 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
 
     let aiAnalysis, provider;
     if (hasGroq) {
-      aiAnalysis = await callGroq(prompt);
-      provider = 'Groq (Llama 3.3)';
+      try {
+        aiAnalysis = await callGroq(prompt);
+        provider = 'Groq (Llama 3.3)';
+      } catch (e) {
+        console.log('Groq 실패, 대체 provider 시도:', e.message);
+        if (hasOpenRouter) {
+          aiAnalysis = await callOpenRouter(prompt);
+          provider = 'OpenRouter (GPT-OSS)';
+        } else {
+          throw e;
+        }
+      }
+    } else if (hasOpenRouter) {
+      aiAnalysis = await callOpenRouter(prompt);
+      provider = 'OpenRouter (GPT-OSS)';
     } else if (hasGemini) {
       aiAnalysis = await callGemini(prompt);
       provider = 'Google Gemini';
