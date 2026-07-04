@@ -402,6 +402,55 @@ async function getTimeseriesFinancials(symbol) {
   return { income, balance, cashflow };
 }
 
+// 한국 주식 전용: 네이버 증권 재무제표 API (Yahoo 429 차단과 무관하게 안정적으로 동작, .KS/.KQ 종목만 지원)
+function parseNaverNum(v) {
+  if (v == null || v === '-') return undefined;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? undefined : n;
+}
+
+async function getNaverKrFinancials(symbol) {
+  const code = symbol.replace(/\.(KS|KQ)$/i, '');
+  const res = await axios.get(`https://m.stock.naver.com/api/stock/${code}/finance/annual`, { timeout: 5000 });
+  const info = res.data?.financeInfo;
+  if (!info) return null;
+
+  const actualKeys = (info.trTitleList || []).filter(t => t.isConsensus !== 'Y').map(t => t.key);
+  const row = (title) => info.rowList.find(r => r.title === title)?.columns || {};
+
+  const revenue = row('매출액');
+  const opInc = row('영업이익');
+  const net = row('당기순이익');
+  const eps = row('EPS');
+  const roe = row('ROE');
+  const opMargin = row('영업이익률');
+  const netMargin = row('순이익률');
+  const debtRatio = row('부채비율');
+  const quickRatio = row('당좌비율');
+  const pbr = row('PBR');
+
+  const UNIT = 1e8; // 억원 단위 -> 원 단위 변환 (Yahoo raw 값과 단위 통일)
+  const income = actualKeys.map(key => ({
+    date: `${key.slice(0, 4)}-${key.slice(4, 6)}-28`,
+    totalRevenue: parseNaverNum(revenue[key]?.value) * UNIT,
+    operatingIncome: parseNaverNum(opInc[key]?.value) * UNIT,
+    netIncome: parseNaverNum(net[key]?.value) * UNIT,
+  })).filter(v => !isNaN(v.totalRevenue));
+
+  const latestKey = actualKeys[actualKeys.length - 1];
+  const keyMetrics = {
+    trailingEps: parseNaverNum(eps[latestKey]?.value),
+    returnOnEquity: parseNaverNum(roe[latestKey]?.value) / 100,
+    operatingMargins: parseNaverNum(opMargin[latestKey]?.value) / 100,
+    profitMargins: parseNaverNum(netMargin[latestKey]?.value) / 100,
+    debtToEquity: parseNaverNum(debtRatio[latestKey]?.value),
+    quickRatio: parseNaverNum(quickRatio[latestKey]?.value),
+    priceToBook: parseNaverNum(pbr[latestKey]?.value),
+  };
+
+  return { income: income.reverse(), keyMetrics };
+}
+
 // 재무제표
 router.get('/financials/:symbol', async (req, res) => {
   try {
@@ -465,6 +514,20 @@ router.get('/financials/:symbol', async (req, res) => {
       const e = qsResult.reason;
       console.log('재무제표 오류:', e.message);
       errors.quoteSummary = { message: e.message, status: e.response?.status, data: e.response?.data };
+    }
+
+    // 한국 주식은 Yahoo가 비어있으면 네이버 증권 데이터로 대체 (Yahoo 429 차단과 무관하게 동작)
+    if (/\.(KS|KQ)$/i.test(symbol) && income.length === 0 && Object.keys(keyMetrics).length === 0) {
+      try {
+        const naver = await getNaverKrFinancials(symbol);
+        if (naver) {
+          if (naver.income.length) income = naver.income;
+          if (Object.keys(naver.keyMetrics).length) keyMetrics = naver.keyMetrics;
+        }
+      } catch (e) {
+        console.log('네이버 재무제표 실패:', e.message);
+        errors.naver = { message: e.message };
+      }
     }
 
     let payload = { income, balance, cashflow, keyMetrics, analystTarget };
