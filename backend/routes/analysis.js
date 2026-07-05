@@ -237,12 +237,13 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
       throw lastError || new Error('사용 가능한 AI provider가 없습니다');
     }
 
-    // 무료 소형 모델(gpt-oss-20b 등)이 한국어 답변에 키릴/아랍/태국/크메르/인도계 문자 등
-    // 엉뚱한 언어를 무작위로 섞어 쓰는 유니코드 글리치가 있어, 비-한글 스크립트를 광범위하게 제거
-    // (PER, EPS, ROE 같은 대문자 금융 약어는 라틴 문자라 보존되고, 소문자 영단어만 별도 제거)
+    // 무료 소형 모델(gpt-oss-20b 등)이 한국어 답변에 키릴/아랍/태국/크메르/조지아/인도계 문자나
+    // 엉뚱한 영단어(België, Llywodraeth 등)를 무작위로 섞어 쓰는 유니코드 글리치가 있어 제거
+    // 라틴 문자 단어는 PER/EPS/ROE/KRW/N-A 같은 짧은 대문자 금융 약어만 남기고 전부 제거
+    const FINANCE_ABBR_RE = /^[A-Z]{1,6}([/-][A-Z0-9]{1,6})?$/;
     aiAnalysis = aiAnalysis
-      .replace(/[Ѐ-ӿ԰-֏֐-׿؀-ۿ܀-ݏހ-޿ऀ-෿฀-໿က-႟ក-៿぀-ヿ㐀-䶿一-鿿]+/g, '')
-      .replace(/\b[a-z]{3,}(?:\s+[a-z]{2,})*\b/g, '');
+      .replace(/[Ѐ-ӿ԰-֏֐-׿؀-ۿ܀-ݏހ-޿ऀ-෿฀-໿က-႟ក-៿぀-ヿ㐀-䶿一-鿿Ⴀ-ჿⰀ-Ⱏ]+/g, '')
+      .replace(/[A-Za-zÀ-ɏ][A-Za-zÀ-ɏ/-]*/g, (word) => (FINANCE_ABBR_RE.test(word) ? word : ''));
 
     res.json({
       ruleBasedAnalysis: ruleBasedResult,
