@@ -144,6 +144,7 @@ router.post('/ai', async (req, res) => {
     }
 
     const prompt = `당신은 전문 주식 분석가입니다. 다음 데이터를 분석하고 투자 의견을 제시해주세요.
+반드시 한국어(한글)로만 답변하세요. 한자, 일본어, 영어 단어를 섞어 쓰지 마세요.
 
 종목: ${quote.name} (${quote.symbol}) / 현재가: ${quote.regularMarketPrice} ${quote.currency}
 시가총액: ${quote.marketCap ? (quote.marketCap / 1e9).toFixed(2) + 'B' : 'N/A'}
@@ -214,6 +215,9 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
     if (!aiAnalysis) {
       throw lastError || new Error('사용 가능한 AI provider가 없습니다');
     }
+
+    // 일부 무료 모델이 답변에 일본어(히라가나/가타카나)나 한자를 섞어 쓰는 경우가 있어 제거
+    aiAnalysis = aiAnalysis.replace(/[぀-ヿ一-鿿]/g, '');
 
     res.json({
       ruleBasedAnalysis: ruleBasedResult,

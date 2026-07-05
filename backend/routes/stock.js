@@ -523,6 +523,50 @@ async function getKrBalanceCashflow(symbol) {
   return { balance, cashflow };
 }
 
+// Finnhub 무료 API의 SEC 10-K 원문 기반 재무제표 (미국 주식 전용, Yahoo 429 차단과 무관하게 동작)
+function finnhubFindValue(section, conceptRe) {
+  const row = (section || []).find(x => conceptRe.test(x.concept));
+  return row?.value;
+}
+
+async function getFinnhubFullFinancials(symbol) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key) return null;
+  const res = await axios.get('https://finnhub.io/api/v1/stock/financials-reported', {
+    params: { symbol, freq: 'annual', token: key },
+    timeout: 8000,
+  });
+  const filings = (res.data?.data || []).slice(0, 5);
+
+  const income = filings.map(f => ({
+    date: f.endDate?.split(' ')[0],
+    totalRevenue: finnhubFindValue(f.report.ic, /RevenueFromContractWithCustomer|^us-gaap_Revenues$/i),
+    operatingIncome: finnhubFindValue(f.report.ic, /^us-gaap_OperatingIncomeLoss$/i),
+    netIncome: finnhubFindValue(f.report.ic, /^us-gaap_NetIncomeLoss$/i),
+  })).filter(v => v.totalRevenue != null);
+
+  const balance = filings.map(f => ({
+    date: f.endDate?.split(' ')[0],
+    totalAssets: finnhubFindValue(f.report.bs, /^us-gaap_Assets$/i),
+    totalLiab: finnhubFindValue(f.report.bs, /^us-gaap_Liabilities$/i),
+    totalStockholderEquity: finnhubFindValue(f.report.bs, /^us-gaap_StockholdersEquity$/i),
+    cash: finnhubFindValue(f.report.bs, /CashAndCashEquivalentsAtCarryingValue/i),
+  })).filter(v => v.totalAssets != null);
+
+  const cashflow = filings.map(f => {
+    const op = finnhubFindValue(f.report.cf, /NetCashProvidedByUsedInOperatingActivities/i);
+    const capex = finnhubFindValue(f.report.cf, /PaymentsToAcquirePropertyPlantAndEquipment/i);
+    return {
+      date: f.endDate?.split(' ')[0],
+      operatingCashflow: op,
+      capitalExpenditures: capex != null ? -capex : undefined,
+      freeCashflow: op != null && capex != null ? op - capex : undefined,
+    };
+  }).filter(v => v.operatingCashflow != null);
+
+  return { income, balance, cashflow };
+}
+
 // 재무제표
 router.get('/financials/:symbol', async (req, res) => {
   try {
@@ -611,6 +655,19 @@ router.get('/financials/:symbol', async (req, res) => {
           console.log('WiseReport 재무상태표/현금흐름표 실패:', e.message);
           errors.wisereport = { message: e.message };
         }
+      }
+    } else if (income.length === 0 && balance.length === 0 && cashflow.length === 0) {
+      // 미국 등 그 외 주식은 Yahoo가 비어있으면 Finnhub의 SEC 10-K 원문 데이터로 대체
+      try {
+        const fh = await getFinnhubFullFinancials(symbol);
+        if (fh) {
+          if (fh.income.length) income = fh.income;
+          if (fh.balance.length) balance = fh.balance;
+          if (fh.cashflow.length) cashflow = fh.cashflow;
+        }
+      } catch (e) {
+        console.log('Finnhub 재무제표 실패:', e.message);
+        errors.finnhub = { message: e.message };
       }
     }
 
