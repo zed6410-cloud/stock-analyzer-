@@ -179,10 +179,11 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
 
 **💡 투자 전략**:`;
 
-    // 순서대로 시도: Groq -> OpenRouter -> NVIDIA NIM -> Gemini -> Claude (앞이 실패하면 다음으로 자동 전환)
+    // 순서대로 시도: OpenRouter -> Groq -> NVIDIA NIM -> Gemini -> Claude (앞이 실패하면 다음으로 자동 전환)
+    // Groq(Llama 3.3)가 한국어 답변에 러시아어/독일어 등 엉뚱한 언어를 섞어 쓰는 경우가 잦아 OpenRouter를 1순위로 변경
     const providerChain = [
-      hasGroq && { name: 'Groq (Llama 3.3)', call: callGroq },
       hasOpenRouter && { name: 'OpenRouter (GPT-OSS)', call: callOpenRouter },
+      hasGroq && { name: 'Groq (Llama 3.3)', call: callGroq },
       hasNvidia && { name: 'NVIDIA NIM (Llama)', call: callNvidia },
       hasGemini && { name: 'Google Gemini', call: callGemini },
     ].filter(Boolean);
@@ -216,8 +217,12 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
       throw lastError || new Error('사용 가능한 AI provider가 없습니다');
     }
 
-    // 일부 무료 모델이 답변에 일본어(히라가나/가타카나)나 한자를 섞어 쓰는 경우가 있어 제거
-    aiAnalysis = aiAnalysis.replace(/[぀-ヿ一-鿿]/g, '');
+    // 일부 무료 모델이 답변에 일본어/한자/러시아어 등 엉뚱한 언어를 섞어 쓰는 경우가 있어 제거
+    // (PER, EPS, ROE 같은 대문자 금융 약어는 보존하고, 소문자 영단어/키릴 문자/한자/가나만 제거)
+    aiAnalysis = aiAnalysis
+      .replace(/[぀-ヿ一-鿿]/g, '')
+      .replace(/[Ѐ-ӿ]+/g, '')
+      .replace(/\b[a-z]{3,}(?:\s+[a-z]{2,})*\b/g, '');
 
     res.json({
       ruleBasedAnalysis: ruleBasedResult,
