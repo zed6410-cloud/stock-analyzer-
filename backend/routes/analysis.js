@@ -188,17 +188,37 @@ ROE: ${financials?.keyMetrics?.returnOnEquity ? (financials.keyMetrics.returnOnE
       hasGemini && { name: 'Google Gemini', call: callGemini },
     ].filter(Boolean);
 
+    // 무료 소형 모델이 가끔 문장 중간에 깨진 괄호/기호("디스플())){", "This . I'll re‑.")를
+    // 내뱉는 경우가 있어, 한글 비중이 지나치게 낮으면 깨진 응답으로 간주하고 재시도
+    function isGarbled(text) {
+      const stripped = text.replace(/\s|[0-9]/g, '');
+      if (stripped.length < 20) return false;
+      const hangul = (stripped.match(/[가-힣]/g) || []).length;
+      const latin = (stripped.match(/[a-zA-Z]/g) || []).length;
+      return hangul / stripped.length < 0.5 || latin / stripped.length > 0.15;
+    }
+
     let aiAnalysis, provider;
     let lastError;
     for (const p of providerChain) {
-      try {
-        aiAnalysis = await p.call(prompt);
+      let attempt;
+      for (let i = 0; i < 2; i++) {
+        try {
+          attempt = await p.call(prompt);
+          if (!isGarbled(attempt)) break;
+          console.log(`${p.name} 응답이 깨져있어 재시도 (${i + 1}회차)`);
+          attempt = undefined;
+        } catch (e) {
+          lastError = e;
+          break;
+        }
+      }
+      if (attempt) {
+        aiAnalysis = attempt;
         provider = p.name;
         break;
-      } catch (e) {
-        console.log(`${p.name} 실패, 다음 provider 시도:`, e.message);
-        lastError = e;
       }
+      console.log(`${p.name} 실패, 다음 provider 시도`);
     }
 
     if (!aiAnalysis && hasClaude) {
