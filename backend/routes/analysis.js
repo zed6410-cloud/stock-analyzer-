@@ -10,7 +10,7 @@ async function callGemini(prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   const res = await axios.post(url, {
     contents: [{ parts: [{ text: prompt }] }],
-  }, { headers: { 'Content-Type': 'application/json' } });
+  }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });
   const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Gemini 응답이 비어있습니다');
   return text;
@@ -24,7 +24,7 @@ async function callGroq(prompt) {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 1500,
-  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } });
+  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` }, timeout: 15000 });
   const text = res.data?.choices?.[0]?.message?.content;
   if (!text) throw new Error('Groq 응답이 비어있습니다');
   return text;
@@ -38,7 +38,7 @@ async function callOpenRouter(prompt) {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 1500,
-  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } });
+  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` }, timeout: 15000 });
   const text = res.data?.choices?.[0]?.message?.content;
   if (!text) throw new Error('OpenRouter 응답이 비어있습니다');
   return text;
@@ -52,7 +52,7 @@ async function callNvidia(prompt) {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 1500,
-  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` } });
+  }, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` }, timeout: 15000 });
   const text = res.data?.choices?.[0]?.message?.content;
   if (!text) throw new Error('NVIDIA NIM 응답이 비어있습니다');
   return text;
